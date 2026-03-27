@@ -458,6 +458,7 @@ def create_distribution_requester_chart(dataframe, output_filename, description)
     df_story[story_col] = pd.to_numeric(df_story[story_col], errors='coerce')
     df_story = df_story.dropna(subset=[story_col])
     dept_story_points = df_story.groupby(dept_col)[story_col].sum().sort_values(ascending=False)
+    zero_sp_counts = df_story[df_story[story_col] == 0].groupby(dept_col).size()
     
     # Create combined plot with dual y-axes
     fig, ax1 = plt.subplots(figsize=(12, 6))
@@ -524,9 +525,11 @@ def create_distribution_requester_chart(dataframe, output_filename, description)
         s = str(req).strip().lower()
         return s == 'giz' or s == 'external partner'
 
-    # For SP == 0, use 0.2 for visualization and label as "< 1"
+    # Zero-SP handling for visualization:
+    # each 0-SP request contributes 0.5 SP-equivalent, so 2 zero-SP requests = 1 SP.
     story_points_for_plot = aligned_story_points.copy()
-    story_points_for_plot = story_points_for_plot.apply(lambda v: 0.2 if float(v) == 0.0 else float(v))
+    zero_sp_counts_aligned = zero_sp_counts.reindex(dept_counts.index).fillna(0).astype(int)
+    story_points_for_plot = story_points_for_plot + (0.5 * zero_sp_counts_aligned)
 
     bar_colors = [teal_color if _is_external_requester(req) else medium_blue for req in dept_counts.index.tolist()]
 
@@ -548,10 +551,12 @@ def create_distribution_requester_chart(dataframe, output_filename, description)
         label_color = teal_color if _is_external_requester(req) else medium_blue
         v_original = float(aligned_story_points.loc[req])
         v_plot = float(story_points_for_plot.loc[req])
-        if v_original == 0.0:
+        zero_count = int(zero_sp_counts_aligned.loc[req])
+        if v_original == 0.0 and zero_count == 1:
             ax2.text(i + 0.2, v_plot, '< 1', ha='center', va='bottom', fontsize=9, color=label_color)
         else:
-            ax2.text(i + 0.2, v_plot, str(int(v_plot)), ha='center', va='bottom', fontsize=9, color=label_color)
+            label_text = f"{int(v_plot)}" if float(v_plot).is_integer() else f"{v_plot:.1f}"
+            ax2.text(i + 0.2, v_plot, label_text, ha='center', va='bottom', fontsize=9, color=label_color)
 
     # Legend as requested (top-right)
     from matplotlib.patches import Patch
@@ -628,9 +633,9 @@ def create_int_ext_pie_chart_no_labels(dataframe, output_filename, description):
         story_points = pd.to_numeric(row[story_col], errors='coerce')
         if pd.isna(story_points):
             continue
-        # If story points are 0, use 0.2 instead (keeps the slice visible)
+        # For visualization aggregation, treat 0 SP as 0.5 SP-equivalent.
         if story_points == 0:
-            story_points = 0.2
+            story_points = 0.5
         
         # Check which classes this ticket belongs to
         ticket_classes = []
@@ -753,15 +758,15 @@ def create_exploding_int_ext_rx_pie_chart(dataframe, output_filename, descriptio
         print(f"Warning: Cannot create {description} - missing required columns")
         return False
 
-    # Story-point weighted slice sizes, with your rule:
-    # if story points (SP) is 0, use 0.2 instead.
+    # Story-point weighted slice sizes:
+    # treat each 0-SP request as 0.5 SP-equivalent.
     totals = {c: 0.0 for c in all_class_columns}
     for _, row in dataframe.iterrows():
         sp = pd.to_numeric(row.get(story_col), errors='coerce')
         if pd.isna(sp):
             continue
         if sp == 0:
-            sp = 0.2
+            sp = 0.5
         for c in all_class_columns:
             val = str(row.get(c, '')).strip().upper()
             if val == 'Y':
